@@ -1,0 +1,2 @@
+recursive-include house_price_prediction/models *.pkl
+recursive-include house_price_prediction/models *.json

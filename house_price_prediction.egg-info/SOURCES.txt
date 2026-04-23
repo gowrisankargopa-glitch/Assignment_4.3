@@ -1,0 +1,17 @@
+MANIFEST.in
+setup.py
+house_price_prediction/__init__.py
+house_price_prediction/database.py
+house_price_prediction/inference.py
+house_price_prediction/main.py
+house_price_prediction/schemas.py
+house_price_prediction.egg-info/PKG-INFO
+house_price_prediction.egg-info/SOURCES.txt
+house_price_prediction.egg-info/dependency_links.txt
+house_price_prediction.egg-info/requires.txt
+house_price_prediction.egg-info/top_level.txt
+house_price_prediction/models/feature_names.json
+house_price_prediction/models/imputer.pkl
+house_price_prediction/models/linear_regression_model.pkl
+house_price_prediction/models/scaler.pkl
+house_price_prediction/models/svm_regression_model.pkl

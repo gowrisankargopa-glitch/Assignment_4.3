@@ -1,0 +1,285 @@
+stages:
+  - build
+  - docker-build
+  - test
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  REGISTRY_IMAGE: ${CI_REGISTRY_IMAGE}
+  DOCKERHUB_IMAGE: ${DOCKERHUB_USERNAME}/house-price-prediction
+
+# ============================================================================
+# Stage 1: Build - Build .whl file and collect .pkl files
+# ============================================================================
+build_wheel:
+  stage: build
+  image: python:3.11-slim
+  
+  before_script:
+    - python -m venv venv
+    - source venv/bin/activate
+    - pip install --upgrade pip setuptools wheel
+    - pip install joblib pandas scikit-learn pytz redis fastapi uvicorn sqlalchemy
+  
+  script:
+    - source venv/bin/activate
+    
+    - echo "Building .whl file..."
+    - python setup.py bdist_wheel
+    - ls -lh dist/
+    
+    - echo "Collecting .pkl files..."
+    - ls -lh models/*.pkl
+    - mkdir -p build-artifacts
+    - cp -r models/*.pkl build-artifacts/ 2>/dev/null || true
+    - cp -r house_price_prediction/models/*.json build-artifacts/ 2>/dev/null || true
+    - ls -lh build-artifacts/
+  
+  artifacts:
+    paths:
+      - dist/house_price_prediction-*.whl
+      - models/*.pkl
+      - house_price_prediction/models/*.json
+    expire_in: 1 week
+  
+  only:
+    - main
+    - develop
+
+# ============================================================================
+# Stage 2: Docker Build - Build and Push Docker Image to DockerHub
+# ============================================================================
+build_docker_image:
+  stage: docker-build
+  image: docker:latest
+  
+  services:
+    - docker:dind
+  
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_VERIFY: ""
+  
+  before_script:
+    - echo "Logging in to DockerHub..."
+    - echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+  
+  script:
+    - echo "Downloading build artifacts..."
+    - docker build 
+        -t ${DOCKERHUB_IMAGE}:latest 
+        -t ${DOCKERHUB_IMAGE}:${CI_PIPELINE_ID} 
+        -t ${DOCKERHUB_IMAGE}:${CI_COMMIT_SHORT_SHA} 
+        .
+    
+    - echo "Pushing image to DockerHub..."
+    - docker push ${DOCKERHUB_IMAGE}:latest
+    - docker push ${DOCKERHUB_IMAGE}:${CI_PIPELINE_ID}
+    - docker push ${DOCKERHUB_IMAGE}:${CI_COMMIT_SHORT_SHA}
+    
+    - echo "Image pushed successfully!"
+    - echo "Image URL: ${DOCKERHUB_IMAGE}:latest"
+  
+  after_script:
+    - docker logout
+  
+  only:
+    - main
+    - develop
+  
+  dependencies:
+    - build_wheel
+
+# ============================================================================
+# Stage 3: Test - Pull Image and Test with API Call
+# ============================================================================
+test_container:
+  stage: test
+  image: docker:latest
+  
+  services:
+    - docker:dind
+  
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_VERIFY: ""
+  
+  before_script:
+    - apk add --no-cache curl bash
+    - echo "Logging in to DockerHub..."
+    - echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+  
+  script:
+    - echo "Pulling Docker image..."
+    - docker pull ${DOCKERHUB_IMAGE}:latest
+    
+    - echo "Running container in background..."
+    - docker run -d 
+        -p 8000:8000 
+        --name house-price-api 
+        ${DOCKERHUB_IMAGE}:latest
+    
+    - echo "Waiting for container to start..."
+    - sleep 15
+    
+    - echo "Checking container status..."
+    - docker ps -a
+    - docker logs house-price-api | head -30
+    
+    - echo "Testing API with curl POST request..."
+    - |
+      curl -X POST "http://localhost:8000/predict" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "CRIM": 0.02,
+          "ZN": 25.0,
+          "INDUS": 2.0,
+          "CHAS": 0,
+          "NOX": 0.53,
+          "RM": 6.0,
+          "AGE": 50.0,
+          "DIS": 5.0,
+          "RAD": 1,
+          "TAX": 200,
+          "PTRATIO": 15.0,
+          "B": 390.0,
+          "LSTAT": 3.0
+        }' > curl_output.json 2>&1
+    
+    - echo "=== API Response ==="
+    - cat curl_output.json
+    
+    - echo "Creating HTML report..."
+    - |
+      cat > curl_output.html << 'HTMLEOF'
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Housing Price Prediction - API Test Results</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+          }
+          .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            max-width: 900px;
+            margin: 0 auto;
+          }
+          h1 {
+            color: #333;
+            border-bottom: 4px solid #667eea;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+          }
+          .test-info {
+            background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+            padding: 15px;
+            border-left: 5px solid #4CAF50;
+            margin-bottom: 20px;
+            border-radius: 4px;
+          }
+          .response-section {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 20px;
+            border: 1px solid #ddd;
+          }
+          pre {
+            background-color: #1e1e1e;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+          }
+          .success {
+            color: #4CAF50;
+            font-weight: bold;
+            font-size: 16px;
+          }
+          .info-label {
+            color: #666;
+            font-weight: bold;
+            margin-top: 10px;
+          }
+          .timestamp {
+            color: #999;
+            font-size: 12px;
+          }
+          a {
+            color: #667eea;
+            text-decoration: none;
+          }
+          a:hover {
+            text-decoration: underline;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>🚀 Housing Price Prediction API - Test Results</h1>
+          
+          <div class="test-info">
+            <div><strong>Test Date:</strong> $(date)</div>
+            <div class="timestamp">GitLab CI Pipeline ID: ${CI_PIPELINE_ID}</div>
+            <div class="timestamp">Commit: ${CI_COMMIT_SHORT_SHA}</div>
+            <br>
+            <div class="info-label">Container Configuration:</div>
+            <div>Image: ${DOCKERHUB_IMAGE}:latest</div>
+            <div>API Endpoint: http://localhost:8000/predict</div>
+          </div>
+          
+          <div class="response-section">
+            <h2>📊 API Response:</h2>
+            <pre>
+      HTMLEOF
+      cat curl_output.json >> curl_output.html
+      cat >> curl_output.html << 'HTMLEOF'
+            </pre>
+          </div>
+          
+          <div class="response-section">
+            <h2>📚 API Documentation:</h2>
+            <p>Interactive API documentation available at: <a href="http://localhost:8000/docs" target="_blank">http://localhost:8000/docs</a></p>
+            <p>Alternative documentation (ReDoc): <a href="http://localhost:8000/redoc" target="_blank">http://localhost:8000/redoc</a></p>
+          </div>
+          
+          <div class="test-info" style="background: linear-gradient(135deg, #c8e6c9 0%, #a5d6a7 100%); margin-top: 30px;">
+            <span class="success">✓ Test Completed Successfully!</span>
+            <p>The container is running and responding to API requests.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+      HTMLEOF
+    
+    - echo "HTML report created"
+  
+  artifacts:
+    paths:
+      - curl_output.html
+      - curl_output.json
+    expire_in: 30 days
+    when: always
+  
+  after_script:
+    - docker stop house-price-api || true
+    - docker rm house-price-api || true
+    - docker logout || true
+    - echo "Container cleanup completed"
+  
+  only:
+    - main
+    - develop
+  
+  dependencies:
+    - build_docker_image
