@@ -41,6 +41,7 @@ jobs:
     - name: Generate .pkl files by running training script
       run: |
         source venv/bin/activate
+        python3 Housing_pred.py
         # If you have a training script, run it here
         # python scripts/train_model.py
         # For now, pkl files already exist in models/ directory
@@ -133,26 +134,22 @@ jobs:
         sleep 5
         
         # Test the API endpoint with sample data
-        curl -X POST "http://localhost:8000/predict" \
+        curl -X POST "http://localhost:8000/predict-all" \
           -H "Content-Type: application/json" \
           -d '{
-            "CRIM": 0.02,
-            "ZN": 25.0,
-            "INDUS": 2.0,
-            "CHAS": 0,
-            "NOX": 0.53,
-            "RM": 6.0,
-            "AGE": 50.0,
-            "DIS": 5.0,
-            "RAD": 1,
-            "TAX": 200,
-            "PTRATIO": 15.0,
-            "B": 390.0,
-            "LSTAT": 3.0
-          }' > curl_output.json 2>&1
+            "longitude": -118.25,
+            "latitude": 34.05,
+            "housing_median_age": 15.0,
+            "total_rooms": 6592.0,
+            "total_bedrooms": 1262.0,
+            "population": 3038.0,
+            "households": 1220.0,
+            "median_income": 5.6431,
+            "ocean_proximity": "NEAR OCEAN"
+            }' > curl_output.json 2>&1
         
         echo "=== Curl Output ===" 
-        cat curl_output.json
+        cat curl_output.json | python3 -m json.tool
     
     - name: Convert curl output to HTML format
       run: |
