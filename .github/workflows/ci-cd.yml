@@ -134,7 +134,7 @@ jobs:
         sleep 5
         
         # Test the API endpoint with sample data
-        curl -X POST "http://localhost:8000/predict-all" \
+        curl -s -X POST "http://localhost:8000/predict-all" \
           -H "Content-Type: application/json" \
           -d '{
             "longitude": -118.25,
@@ -149,7 +149,15 @@ jobs:
             }' > curl_output.json 2>&1
         
         echo "=== Curl Output ===" 
-        cat curl_output.json | python3 -m json.tool
+        cat curl_output.json
+        
+        # Pretty print if valid JSON
+        if python3 -m json.tool < curl_output.json > /dev/null 2>&1; then
+          echo "=== Formatted JSON ===" 
+          python3 -m json.tool < curl_output.json
+        else
+          echo "Warning: Output is not valid JSON"
+        fi
     
     - name: Convert curl output to HTML format
       run: |
